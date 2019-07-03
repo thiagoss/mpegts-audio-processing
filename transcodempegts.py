@@ -1,11 +1,27 @@
 #!/usr/bin/env python
 
 import sys
+import os
 
 import gi
 gi.require_version('Gst', '1.0')
 
 from gi.repository import GObject, Gst, GLib
+
+
+def build_configured_caps():
+    structure = Gst.Structure.new_empty("audio/x-raw")
+    channels = os.environ.get('channels')
+    sampleformat = os.environ.get('sampleformat')
+    if channels:
+        structure.set_value("channels", int(channels))
+    if sampleformat:
+        structure.set_value("format", sampleformat)
+
+
+    caps = Gst.Caps.new_empty()
+    caps.append_structure(structure)
+    return caps
 
 
 def bus_call(bus, message, loop):
@@ -103,6 +119,7 @@ class GstAppContext:
         audioconvert = Gst.ElementFactory.make('audioconvert', None)
         audiorate = Gst.ElementFactory.make('audiorate', None)
         audioresample = Gst.ElementFactory.make('audioresample', None)
+        capsfilter = Gst.ElementFactory.make('capsfilter', None)
         flacenc = Gst.ElementFactory.make('flacenc', None)
         queue2 = Gst.ElementFactory.make('queue', None)
         appsink = Gst.ElementFactory.make('appsink', None)
@@ -110,11 +127,15 @@ class GstAppContext:
         pipeline.add(audioconvert)
         pipeline.add(audiorate)
         pipeline.add(audioresample)
+        pipeline.add(capsfilter)
         pipeline.add(flacenc)
         pipeline.add(queue2)
         pipeline.add(appsink)
 
         # Set our callbacks to appsink
+        caps = build_configured_caps()
+        if caps:
+            capsfilter.set_property("caps", caps)
         appsink.set_property('emit-signals', True)
         appsink.connect('new-sample', self.new_sample, None)
         appsink.connect('eos', self.eos, None)
@@ -123,7 +144,8 @@ class GstAppContext:
         queue.link(audioconvert)
         audioconvert.link(audiorate)
         audiorate.link(audioresample)
-        audioresample.link(flacenc)
+        audioresample.link(capsfilter)
+        capsfilter.link(flacenc)
         flacenc.link(queue2)
         queue2.link(appsink)
 
@@ -132,6 +154,7 @@ class GstAppContext:
         appsink.sync_state_with_parent()
         queue2.sync_state_with_parent()
         flacenc.sync_state_with_parent()
+        capsfilter.sync_state_with_parent()
         audioresample.sync_state_with_parent()
         audiorate.sync_state_with_parent()
         audioconvert.sync_state_with_parent()
